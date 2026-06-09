@@ -1,0 +1,46 @@
+# ============================================================
+# Push CLP Tool — 配置文件
+# 本地覆盖：创建 config.local.yaml 即可，git 忽略
+# ============================================================
+
+# === 本地文件路径 ===
+loading_table_path: "%USERPROFILE%/Desktop/Loading_V2.2.xlsm"
+loading_sheet:       "List"
+loading_header_row:  5
+
+mspp_list_path:      "data/MSPP List Review 2026May.xlsx"
+lsp_email_path:      "data/LSP邮箱.xlsx"
+blurb_clp_path:      "data/Blurb_CLP.txt"
+
+# === Loading 表列名映射 ===
+loading_cols:
+  al0:              "AL0"
+  pol:              "POL"
+  pod:              "POD"
+  flipped_fc:       "Flipped_fc"
+  si_sent:          "SI SENT-OC"
+  customs_seller:   "报关资料-CHB"
+  shipper_id:       "Shipper"
+
+# === MSPP Shipper List 配置 ===
+mspp_sheet:          "MSPP seller raw data"
+mspp_col_shipper_id: "shipper_id"
+
+# === OC 系统 ===
+oc_base_url: "https://trans-logistics-cn.amazon.com"
+oc_browser:  "firefox"
+
+# === 港口别名映射 ===
+pol_alias:
+  CNSZX: "CNYTN"
+
+# === 过滤条件 ===
+target_pol: ["CNYTN", "CNNGB", "CNXMN", "CNSHA", "CNTAO"]
+target_pod: ["USLAX", "USNYC", "USSAV"]
+
+# === 缓存 ===
+db_path:             "data/booking_cache.db"
+cache_refresh_hours: 24
+
+# === 时区 ===
+timezone: "Asia/Shanghai"

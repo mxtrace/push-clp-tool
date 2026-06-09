@@ -1,0 +1,14 @@
+# Push CLP Tool
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+*.spec
+config.local.yaml
+data/booking_cache.db
+data/run_result.json
+data/run_log_*.txt
+data/MSPP*.xlsx
+data/draft_queue.json
+.pytest_cache/
