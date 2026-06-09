@@ -264,7 +264,7 @@ def run_task2(
             trace.result = "SKIP_B"
             traces.append(trace)
             print(
-                f"         [{order.al0}] 步骤B SKIP Service={nearest.service_string} "
+                f"         [{order.al0}] 步骤B SKIP POL={pol} POD={pod} Service={nearest.service_string} "
                 f"CLP={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} "
                 f"ETD={nearest.etd} "
                 f"AllReadyCut={nearest.all_ready_cut_date} {nearest.all_ready_cut_time} "
@@ -281,7 +281,7 @@ def run_task2(
             f"AllReadyCut={nearest.all_ready_cut_date} {nearest.all_ready_cut_time}"
         )
         print(
-            f"         [{order.al0}] 步骤B PASS Service={nearest.service_string} "
+            f"         [{order.al0}] 步骤B PASS POL={pol} POD={pod} Service={nearest.service_string} "
             f"CLP={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} "
             f"ETD={nearest.etd} "
             f"AllReadyCut={nearest.all_ready_cut_date} {nearest.all_ready_cut_time}",
