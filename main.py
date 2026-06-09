@@ -29,6 +29,7 @@ from modules.schedule_builder import build_weekly_schedule, get_schedule_range
 from modules.order_matcher    import (
     load_loading_table, load_mspp_shipper_list,
     apply_mspp_flag, apply_smp_and_contact_flags,
+    filter_orders_by_potential_sailing,
 )
 from modules.booking_cache    import BookingCache
 from modules.push_clp         import run_task2, load_lsp_emails
@@ -176,11 +177,24 @@ def _run(now: datetime, log_path: Path) -> None:
     print(f"         MSPP 订单: {len(mspp_orders)} 条", flush=True)
 
     # 获取 SMP 标记（通过 OC Booking 缓存）
+    # ── 优化：先用船期表预筛，只查有匹配船期（CLP Cutoff=今天/明天）的 MSPP 订单 ──
+    presort_orders = filter_orders_by_potential_sailing(
+        mspp_orders, weekly_with_clp, now.date(),
+        pol_alias=pol_alias,
+    )
+    print(
+        f"         预筛后需查 SMP: {len(presort_orders)} 条"
+        f"（原 MSPP {len(mspp_orders)} 条，节省 {len(mspp_orders) - len(presort_orders)} 次 API）",
+        flush=True,
+    )
+
     db_path = _cfg_path(cfg.get("db_path", "data/booking_cache.db"))
+    oc_session = build_oc_session(browser)   # 共享 Session，复用认证 Cookie
     with BookingCache(db_path, cache_refresh_hours=int(cfg.get("cache_refresh_hours", 24))) as cache:
         cache_data = cache.refresh_batch(
-            [o.al0 for o in mspp_orders],
-            lambda al0: fetch_booking_detail(al0, browser=browser),
+            [o.al0 for o in presort_orders],
+            lambda al0: fetch_booking_detail(al0, browser=browser, session=oc_session),
+            max_workers=int(cfg.get("smp_fetch_workers", 5)),
         )
     apply_smp_and_contact_flags(orders, cache_data)
 

@@ -248,31 +248,79 @@ class BookingCache:
     def refresh_batch(
         self,
         al0_list: list[str],
-        oc_client_fn,          # Callable[[str], Optional[dict]]
+        oc_client_fn,
         force: bool = False,
+        max_workers: int = 5,
     ) -> dict[str, dict]:
         """
-        对 al0_list 中需要刷新的 AL0 逐一调用 oc_client_fn 更新缓存。
+        对 al0_list 中需要刷新的 AL0 调用 oc_client_fn 更新缓存。
+        使用线程池并发请求，默认 5 个 Worker，大幅缩短查询时间。
 
         Args:
             al0_list:     待检查的 AL0 列表
             oc_client_fn: fetch_booking_detail(al0) -> dict | None
             force:        True = 忽略缓存时间，全量刷新
+            max_workers:  并发线程数（默认 5）
 
         Returns:
             {al0: cache_row_dict} — 所有 AL0 的最新缓存数据
         """
-        total = len(al0_list)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import time as _time
+
+        total     = len(al0_list)
+        to_fetch  = [al0 for al0 in al0_list if force or self.needs_refresh(al0)]
+        skipped   = total - len(to_fetch)
+
+        print(
+            f"         Booking 缓存检查: 共 {total} 条 | "
+            f"需拉取 {len(to_fetch)} 条 | 缓存命中跳过 {skipped} 条",
+            flush=True,
+        )
+
         refreshed = 0
-        for i, al0 in enumerate(al0_list):
-            if force or self.needs_refresh(al0):
-                detail = oc_client_fn(al0)
+        if to_fetch:
+            t0 = _time.monotonic()
+            # ── 并发拉取（线程池）────────────────────────────────────────
+            fetched: list[tuple[str, dict | None]] = [None] * len(to_fetch)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                future_map = {
+                    pool.submit(oc_client_fn, al0): idx
+                    for idx, al0 in enumerate(to_fetch)
+                }
+                done = 0
+                for fut in as_completed(future_map):
+                    idx = future_map[fut]
+                    al0 = to_fetch[idx]
+                    done += 1
+                    try:
+                        detail = fut.result()
+                    except Exception as exc:
+                        print(f"[WARN] {al0}: {exc}", flush=True)
+                        detail = None
+                    fetched[idx] = (al0, detail)
+                    if done % max_workers == 0 or done == len(to_fetch):
+                        elapsed = _time.monotonic() - t0
+                        avg = elapsed / done
+                        remain = int(avg * (len(to_fetch) - done))
+                        print(
+                            f"         [{done:3d}/{len(to_fetch)}]  "
+                            f"耗时 {elapsed:.0f}s  ETA≈{remain}s",
+                            flush=True,
+                        )
+
+            # ── 串行写入 SQLite（避免并发写冲突）───────────────────────
+            for al0, detail in fetched:
                 if detail:
                     self.upsert_oc_detail(al0, detail)
-                refreshed += 1
-            # 每 50 条打印一次进度
-            if (i + 1) % 50 == 0 or (i + 1) == total:
-                print(f"         Booking 缓存: {i+1}/{total} 已检查，本次刷新 {refreshed} 条", flush=True)
+                    refreshed += 1
+
+            elapsed = _time.monotonic() - t0
+            print(
+                f"         Booking 缓存完成: 刷新 {refreshed} 条  "
+                f"跳过 {skipped} 条  总耗时 {elapsed:.0f}s",
+                flush=True,
+            )
 
         result = {}
         for al0 in al0_list:

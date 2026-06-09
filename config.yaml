@@ -48,3 +48,6 @@ timezone: "Asia/Shanghai"
 # === 运行报告邮件 ===
 # 每次运行结束后自动发送报告至此邮箱（空字符串=不发送）
 report_email_to: "miaoyua@amazon.com"
+
+# === 并发查询 ===
+smp_fetch_workers: 5   # 模块2 SMP 查询并发线程数
