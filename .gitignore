@@ -12,3 +12,4 @@ data/run_log_*.txt
 data/MSPP*.xlsx
 data/draft_queue.json
 .pytest_cache/
+dist/PushCLP/
