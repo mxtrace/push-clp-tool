@@ -255,7 +255,10 @@ def run_task2(
         if clp_date not in (today, tomorrow):
             trace.step_b = "DATE_MISMATCH"
             trace.step_b_detail = (
+                f"Service={nearest.service_string} "
                 f"CLP_Cutoff={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} "
+                f"ETD={nearest.etd} "
+                f"AllReadyCut={nearest.all_ready_cut_date} {nearest.all_ready_cut_time} "
                 f"不在今天({today})/明天({tomorrow})"
             )
             trace.result = "SKIP_B"
@@ -268,8 +271,10 @@ def run_task2(
 
         trace.step_b = "PASS"
         trace.step_b_detail = (
+            f"Service={nearest.service_string} "
             f"CLP_Cutoff={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} "
-            f"ETD={nearest.etd}"
+            f"ETD={nearest.etd} "
+            f"AllReadyCut={nearest.all_ready_cut_date} {nearest.all_ready_cut_time}"
         )
         step_b_pass.append((order, nearest, trace))
 

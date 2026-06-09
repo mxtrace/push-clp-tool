@@ -35,6 +35,7 @@ class SailingRecord:
     all_ready_cut_time:     Optional[str]       = None   # "HH:MM"
     all_ready_cut_datetime: Optional[datetime]  = None
     clp_cutoff:             Optional[datetime]  = None   # PLOT localDateTimeCLPCutoff
+    service_string:         str                 = ""     # PLOT serviceString (e.g. PRX, CBX)
     anomaly:                bool                = False
     anomaly_reason:         str                 = ""
 
@@ -175,8 +176,9 @@ def build_weekly_schedule(
         etd       = _parse_etd(rec)
         si_cutoff = _parse_si_cutoff(rec)
         clp_cutoff = _parse_clp_cutoff(rec)
-        vessel    = rec.get("vessel", "")
-        voyage    = rec.get("voyage", "")
+        vessel         = rec.get("vessel", "")
+        voyage         = rec.get("voyage", "")
+        service_string = rec.get("serviceString", "")
         avail     = float(rec.get("capacityAvailableValue", 0))
 
         if etd is None or si_cutoff is None:
@@ -201,6 +203,7 @@ def build_weekly_schedule(
             all_ready_cut_time=cut_time_str,
             all_ready_cut_datetime=cut_dt,
             clp_cutoff=clp_cutoff,
+            service_string=service_string,
         ))
 
     return ok_sailings, anomaly_sailings
