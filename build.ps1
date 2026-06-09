@@ -47,4 +47,4 @@ Get-ChildItem -Path "$OutDir\data" -File | ForEach-Object {
     Write-Host "   data\$($_.Name)"
 }
 Write-Host ""
-Write-Host "同事安装步骤：将 PushCLP\ 整个文件夹复制到 Desktop，在 Aki 说『帮我初始化 Push CLP 定时任务』" -ForegroundColor Yellow
+Write-Host "同事安装步骤：将 PushCLP 整个文件夹复制到 Desktop" -ForegroundColor Yellow
