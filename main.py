@@ -1,6 +1,6 @@
 """
 main.py — Push CLP Tool 主入口
-每次运行执行完整的 Task 2 流程：模块1 → 模块2 → Task2 → Outlook 弹窗。
+每次运行执行完整的 Task 2 流程：模块1 → 模块2 → Task2 → Outlook 弹窗 → 报告邮件。
 由 Aki Scheduled Task 在工作日 09:30 / 14:00 调用。
 """
 from __future__ import annotations
@@ -33,6 +33,7 @@ from modules.order_matcher    import (
 from modules.booking_cache    import BookingCache
 from modules.push_clp         import run_task2, load_lsp_emails
 from modules.outlook_new_email import open_clp_email_drafts
+from modules.report_email     import send_report_email
 from modules.working_hours    import is_workday
 from modules.updater          import check_and_update, cleanup_old, VERSION
 
@@ -93,7 +94,7 @@ def main() -> None:
     print(f"[{now.strftime('%Y-%m-%d %H:%M')} CST] Push CLP Tool v{VERSION} 开始运行", flush=True)
 
     try:
-        _run(now)
+        _run(now, log_path)
     except Exception:
         print("\n[FATAL] 发生未预期异常：", flush=True)
         print(_traceback.format_exc(), flush=True)
@@ -104,7 +105,7 @@ def main() -> None:
         print(f"[完成] 日志已写入: {log_path}")
 
 
-def _run(now: datetime) -> None:
+def _run(now: datetime, log_path: Path) -> None:
     # ── 自动更新检查 ───────────────────────────────────────────────
     cleanup_old()
     if check_and_update():
@@ -118,6 +119,7 @@ def _run(now: datetime) -> None:
     # ── 加载配置 ──────────────────────────────────────────────────────────
     cfg     = load_config(ROOT / "config.yaml")
     browser = cfg.get("oc_browser", "firefox")
+    run_time_str = now.strftime("%Y-%m-%d %H:%M")
 
     # ── 模块1：构建周船期表 ───────────────────────────────────────────────
     print("  [模块1] 拉取 PLOT 数据...", flush=True)
@@ -185,10 +187,6 @@ def _run(now: datetime) -> None:
     smp_orders = [o for o in orders if o.is_target]
     print(f"         目标订单（MSPP+SMP）: {len(smp_orders)} 条", flush=True)
 
-    if not smp_orders:
-        print("  本次运行无目标订单，结束。", flush=True)
-        return
-
     # ── 读取辅助数据 ──────────────────────────────────────────────────────
     lsp_email_path = _cfg_path(cfg.get("lsp_email_path", "data/LSP邮箱.xlsx"))
     lsp_emails     = load_lsp_emails(lsp_email_path)
@@ -198,59 +196,100 @@ def _run(now: datetime) -> None:
     blurb_html = load_blurb(blurb_path)
     print(f"         Blurb_CLP: {len(blurb_html)} 字符", flush=True)
 
+    # ── 统计对象（贯穿全流程收集）────────────────────────────────────────
+    stats = {
+        "total_orders":  len(orders),
+        "mspp_orders":   len(mspp_orders),
+        "target_orders": len(smp_orders),
+        "step_b_pass":   0,
+        "step_c_pass":   0,
+        "step_d_pass":   0,
+        "final_pushed":  0,
+    }
+
     # ── Task 2：Push CLP 主流程 ───────────────────────────────────────────
     print("  [Task2] 开始 Push CLP 流程...", flush=True)
-    clp_items, email_drafts = run_task2(
-        orders          = orders,
-        weekly_schedule = weekly_with_clp,
-        lsp_emails      = lsp_emails,
-        blurb_html      = blurb_html,
-        browser         = browser,
-        now             = now,
-    )
+
+    if not smp_orders:
+        print("  本次运行无目标订单，跳过 Task2。", flush=True)
+        clp_items    = []
+        email_drafts = []
+        traces       = []
+    else:
+        clp_items, email_drafts, traces = run_task2(
+            orders          = orders,
+            weekly_schedule = weekly_with_clp,
+            lsp_emails      = lsp_emails,
+            blurb_html      = blurb_html,
+            browser         = browser,
+            now             = now,
+        )
+
+    # ── 统计补全 ─────────────────────────────────────────────────────────
+    stats["step_b_pass"]  = sum(1 for t in traces if t.step_b == "PASS")
+    stats["step_c_pass"]  = sum(1 for t in traces if t.step_c == "PASS")
+    stats["step_d_pass"]  = sum(1 for t in traces if t.step_d == "PASS")
+    stats["final_pushed"] = len(clp_items)
 
     print(f"\n  === 运行结果 ===", flush=True)
     print(f"  CLP 清单: {len(clp_items)} 条", flush=True)
     for item in clp_items:
         print(f"    {item.al0}  CLP_Cutoff={item.clp_cutoff_str}  POL={item.pol}  POD={item.pod}", flush=True)
 
-    if not email_drafts:
+    # ── Outlook 弹窗（LSP 邮件草稿）──────────────────────────────────────
+    popup_result = None
+    if email_drafts:
+        print(f"\n  [Outlook] 打开 {len(email_drafts)} 封邮件草稿...", flush=True)
+        popup_result = open_clp_email_drafts(email_drafts)
+        print(f"\n  邮件草稿已打开: {popup_result.opened} 封（请 POC 审核后手动发送）", flush=True)
+        if popup_result.anomalies:
+            print(f"  异常: {len(popup_result.anomalies)} 封", flush=True)
+            for a in popup_result.anomalies:
+                print(f"    POL={a['pol']}: {a['reason']}", flush=True)
+    else:
         print("  无邮件草稿需要发送。", flush=True)
-        return
 
-    # ── Outlook 弹窗 ──────────────────────────────────────────────────────
-    print(f"\n  [Outlook] 打开 {len(email_drafts)} 封邮件草稿...", flush=True)
-    result = open_clp_email_drafts(email_drafts)
+    anomalies = popup_result.anomalies if popup_result else []
 
-    print(f"\n  === 完成 ===", flush=True)
-    print(f"  邮件草稿已打开: {result.opened} 封（请 POC 审核后手动发送）", flush=True)
-    if result.anomalies:
-        print(f"  异常: {len(result.anomalies)} 封", flush=True)
-        for a in result.anomalies:
-            print(f"    POL={a['pol']}: {a['reason']}", flush=True)
-
-    # ── 写入 run_result.json（供 Aki 定时任务读取摘要）────────────────────────
+    # ── 写入 run_result.json（详细版）────────────────────────────────────
     run_result = {
-        "run_time":           now.strftime("%Y-%m-%d %H:%M"),
-        "clp_items":          [
+        "run_time":   run_time_str,
+        "version":    VERSION,
+        "stats":      stats,
+        "clp_items":  [
             {
-                "al0":              item.al0,
-                "pol":              item.pol,
-                "pod":              item.pod,
-                "etd":              item.etd_str,
-                "clp_cutoff":       item.clp_cutoff_str,
-                "all_ready_cut":    item.all_ready_cut_str,
+                "al0":           item.al0,
+                "pol":           item.pol,
+                "pod":           item.pod,
+                "etd":           item.etd_str,
+                "clp_cutoff":    item.clp_cutoff_str,
+                "all_ready_cut": item.all_ready_cut_str,
             }
             for item in clp_items
         ],
+        "match_trace":       [t.to_dict() for t in traces],
         "email_drafts_count": len(email_drafts),
-        "popup_opened":       result.opened,
-        "popup_anomalies":    result.anomalies,
+        "popup_opened":       popup_result.opened if popup_result else 0,
+        "popup_anomalies":    anomalies,
     }
     result_path = ROOT / "data" / "run_result.json"
     with open(result_path, "w", encoding="utf-8") as _rf:
         json.dump(run_result, _rf, ensure_ascii=False, indent=2)
     print(f"  结果已写入: {result_path}", flush=True)
+
+    # ── 发送运行报告邮件（始终执行，含 0 推送的情况）────────────────────
+    print("\n  [报告邮件] 准备发送运行报告...", flush=True)
+    send_report_email(
+        stats       = stats,
+        traces      = traces,
+        log_path    = log_path,
+        result_path = result_path,
+        cfg         = cfg,
+        run_time    = run_time_str,
+        anomalies   = anomalies,
+    )
+
+    print(f"\n  === 完成 ===", flush=True)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,35 @@ class CLPEmailDraft:
     items:     list[CLPItem] = field(default_factory=list)
 
 
+@dataclass
+class OrderTrace:
+    """单条目标订单在 Task2 各步骤的追踪记录（用于详细 JSON + 报告邮件）。"""
+    al0:          str
+    pol:          str
+    pod:          str
+    step_b:       str = "N/A"   # PASS / NO_SAILING / DATE_MISMATCH
+    step_b_detail: str = ""
+    step_c:       str = "N/A"   # PASS / OPEN_TASKS / QUERY_FAIL
+    step_c_detail: str = ""
+    step_d:       str = "N/A"   # PASS / HAS_CLP / QUERY_FAIL
+    step_d_detail: str = ""
+    result:       str = "SKIP_B"  # PUSHED / SKIP_B / SKIP_C / SKIP_D
+
+    def to_dict(self) -> dict:
+        return {
+            "al0":          self.al0,
+            "pol":          self.pol,
+            "pod":          self.pod,
+            "step_b":       self.step_b,
+            "step_b_detail": self.step_b_detail,
+            "step_c":       self.step_c,
+            "step_c_detail": self.step_c_detail,
+            "step_d":       self.step_d,
+            "step_d_detail": self.step_d_detail,
+            "result":       self.result,
+        }
+
+
 def load_lsp_emails(
     file_path: str,
     pol_alias: dict[str, str] | None = None,
@@ -176,7 +205,7 @@ def run_task2(
     blurb_html:      str,
     browser:         str = "firefox",
     now:             Optional[datetime] = None,
-) -> tuple[list[CLPItem], list[CLPEmailDraft]]:
+) -> tuple[list[CLPItem], list[CLPEmailDraft], list[OrderTrace]]:
     """
     Push CLP Task 2 主流程（PRD 步骤 B–F）。
 
@@ -189,7 +218,7 @@ def run_task2(
         now:             当前时间（默认北京时间，方便测试 mock）
 
     Returns:
-        (clp_items, email_drafts)
+        (clp_items, email_drafts, traces)
     """
     if now is None:
         now = datetime.now(BEIJING_TZ)
@@ -203,33 +232,51 @@ def run_task2(
 
     # 预筛：找出有匹配船期且 CLP Cutoff 在今天/明天的订单
     step_b_pass: list[tuple[OrderRecord, SailingRecord]] = []
+    traces: list[OrderTrace] = []
 
     for order in target_orders:
         # B-1: POL 映射
         pol = POL_ALIAS.get(order.pol, order.pol)
         pod = order.pod
+        trace = OrderTrace(al0=order.al0, pol=pol, pod=pod)
 
         # B-2: 匹配最近船期
         nearest = _find_nearest_sailing(pol, pod, weekly_schedule, now)
         if nearest is None:
+            trace.step_b = "NO_SAILING"
+            trace.step_b_detail = f"无匹配船期（POL={pol} POD={pod}）"
+            trace.result = "SKIP_B"
+            traces.append(trace)
             print(f"         [{order.al0}] 步骤B 无匹配船期（POL={pol} POD={pod}），跳过", flush=True)
             continue
 
         # B-3: CLP_Cutoff 日期 = 今天或明天
         clp_date = nearest.clp_cutoff.date()
         if clp_date not in (today, tomorrow):
+            trace.step_b = "DATE_MISMATCH"
+            trace.step_b_detail = (
+                f"CLP_Cutoff={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} "
+                f"不在今天({today})/明天({tomorrow})"
+            )
+            trace.result = "SKIP_B"
+            traces.append(trace)
             print(
                 f"         [{order.al0}] 步骤B CLP Cutoff={clp_date} 不在今天/明天，跳过",
                 flush=True,
             )
             continue
 
-        step_b_pass.append((order, nearest))
+        trace.step_b = "PASS"
+        trace.step_b_detail = (
+            f"CLP_Cutoff={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} "
+            f"ETD={nearest.etd}"
+        )
+        step_b_pass.append((order, nearest, trace))
 
     print(f"  [Task2] 步骤B 通过: {len(step_b_pass)} 条", flush=True)
 
     if not step_b_pass:
-        return [], []
+        return [], [], traces
 
     # 创建共享 OC Session（避免每条 AL0 重读 Cookie）
     oc_session = build_oc_session(browser)
@@ -237,30 +284,51 @@ def run_task2(
     # ── 步骤 C + D：Task 全关闭 + 未 CLP ────────────────────────────────
     clp_items: list[CLPItem] = []
 
-    for order, sailing in step_b_pass:
+    for order, sailing, trace in step_b_pass:
         pol = POL_ALIAS.get(order.pol, order.pol)
 
         # 步骤 C：所有相关 Task 已关闭
         all_closed = fetch_clp_tasks_all_closed(order.al0, browser=browser, session=oc_session)
         if all_closed is None:
+            trace.step_c = "QUERY_FAIL"
+            trace.step_c_detail = "Task 查询失败，保守跳过"
+            trace.result = "SKIP_C"
+            traces.append(trace)
             print(f"         [{order.al0}] 步骤C 查询失败，保守跳过", flush=True)
             continue
         if not all_closed:
-            # 日志已在 fetch_clp_tasks_all_closed 内打印
+            trace.step_c = "OPEN_TASKS"
+            trace.step_c_detail = "存在未关闭的 Task"
+            trace.result = "SKIP_C"
+            traces.append(trace)
             continue
 
+        trace.step_c = "PASS"
+        trace.step_c_detail = "7个 Task 全部 CLOSED"
         print(f"         [{order.al0}] 步骤C 通过（所有 Task 已关闭）", flush=True)
 
         # 步骤 D：Container Number 为空（尚未 CLP）
         time.sleep(0.2)
         detail = fetch_booking_detail(order.al0, browser=browser, session=oc_session)
         if detail is None:
+            trace.step_d = "QUERY_FAIL"
+            trace.step_d_detail = "Booking 详情获取失败"
+            trace.result = "SKIP_D"
+            traces.append(trace)
             print(f"         [{order.al0}] 步骤D Booking 详情获取失败，跳过", flush=True)
             continue
         if detail.get("has_clp", False):
+            trace.step_d = "HAS_CLP"
+            trace.step_d_detail = "containers 非空，已完成 CLP"
+            trace.result = "SKIP_D"
+            traces.append(trace)
             print(f"         [{order.al0}] 步骤D 已完成 CLP（containers 非空），跳过", flush=True)
             continue
 
+        trace.step_d = "PASS"
+        trace.step_d_detail = "containers 为空，尚未 CLP"
+        trace.result = "PUSHED"
+        traces.append(trace)
         print(f"         [{order.al0}] 步骤D 通过（尚未 CLP）✓ 纳入清单", flush=True)
 
         # ── 步骤 E：记录清单 ─────────────────────────────────────────────
@@ -278,7 +346,7 @@ def run_task2(
     print(f"  [Task2] 步骤E 最终清单: {len(clp_items)} 条", flush=True)
 
     if not clp_items:
-        return clp_items, []
+        return clp_items, [], traces
 
     # ── 步骤 F：按 POL 分组，生成邮件草稿 ───────────────────────────────
     pol_groups: dict[str, list[CLPItem]] = {}
@@ -308,4 +376,4 @@ def run_task2(
             flush=True,
         )
 
-    return clp_items, email_drafts
+    return clp_items, email_drafts, traces
