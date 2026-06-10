@@ -48,7 +48,12 @@ class _TeeLogger:
         self._stderr = sys.stderr
 
     def write(self, msg: str) -> None:
-        self._stdout.write(msg)
+        try:
+            self._stdout.write(msg)
+        except UnicodeEncodeError:
+            # stdout 编码（如 GBK）不支持该字符时降级输出，日志文件仍保留原文
+            enc = getattr(self._stdout, 'encoding', 'ascii') or 'ascii'
+            self._stdout.write(msg.encode(enc, errors='replace').decode(enc))
         self._file.write(msg)
 
     def flush(self) -> None:
