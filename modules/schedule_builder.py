@@ -178,7 +178,13 @@ def build_weekly_schedule(
         clp_cutoff = _parse_clp_cutoff(rec)
         vessel         = rec.get("vessel", "")
         voyage         = rec.get("voyage", "")
+        # serviceString 有时为空，从 serviceId 第2段提取（如 MDU_PRX_FBA_... → PRX）
         service_string = rec.get("serviceString", "")
+        if not service_string:
+            service_id = rec.get("serviceId", "")
+            parts = service_id.split("_")
+            if len(parts) >= 2:
+                service_string = parts[1]
         avail     = float(rec.get("capacityAvailableValue", 0))
 
         if etd is None or si_cutoff is None:

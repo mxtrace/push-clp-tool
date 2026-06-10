@@ -250,7 +250,7 @@ def run_task2(
             print(f"         [{order.al0}] 步骤B 无匹配船期（POL={pol} POD={pod}），跳过", flush=True)
             continue
 
-        # B-3: CLP_Cutoff 日期 = 今天或明天
+        # B-3: CLP_Cutoff 日期 = 今天或明天，且截止时间未到
         clp_date = nearest.clp_cutoff.date()
         if clp_date not in (today, tomorrow):
             trace.step_b = "DATE_MISMATCH"
@@ -269,6 +269,22 @@ def run_task2(
                 f"ETD={nearest.etd} "
                 f"AllReadyCut={nearest.all_ready_cut_date} {nearest.all_ready_cut_time} "
                 f"不在今天/明天，跳过",
+                flush=True,
+            )
+            continue
+        if nearest.clp_cutoff <= now:
+            trace.step_b = "CLP_EXPIRED"
+            trace.step_b_detail = (
+                f"Service={nearest.service_string} "
+                f"CLP_Cutoff={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} "
+                f"ETD={nearest.etd} "
+                f"截止时间已过（now={now.strftime('%Y-%m-%d %H:%M')}）"
+            )
+            trace.result = "SKIP_B"
+            traces.append(trace)
+            print(
+                f"         [{order.al0}] 步骤B SKIP CLP截止已过 POL={pol} POD={pod} Service={nearest.service_string} "
+                f"CLP={nearest.clp_cutoff.strftime('%Y-%m-%d %H:%M')} now={now.strftime('%H:%M')}",
                 flush=True,
             )
             continue
