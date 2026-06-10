@@ -8,7 +8,7 @@ $OutDir = "dist\PushCLP"
 
 # === [1/4] PyInstaller 打包 ===
 Write-Host "=== [1/4] PyInstaller 打包 ===" -ForegroundColor Cyan
-python -m PyInstaller --onefile --distpath dist --workpath build --name PushCLP main.py
+python -m PyInstaller PushCLP.spec --noconfirm
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: PyInstaller 失败" -ForegroundColor Red; exit 1
 }
