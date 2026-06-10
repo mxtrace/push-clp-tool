@@ -178,9 +178,10 @@ def build_weekly_schedule(
         clp_cutoff = _parse_clp_cutoff(rec)
         vessel         = rec.get("vessel", "")
         voyage         = rec.get("voyage", "")
-        # serviceString 有时为空，从 serviceId 第2段提取（如 MDU_PRX_FBA_... → PRX）
-        service_string = rec.get("serviceString", "")
+        # PLOT 实际字段名为 carrierServiceString（如 CBX、PRX、SAX）
+        service_string = rec.get("carrierServiceString", "")
         if not service_string:
+            # 兜底：从 serviceId 第2段提取（CMDU_CBX_FBA_... → CBX）
             service_id = rec.get("serviceId", "")
             parts = service_id.split("_")
             if len(parts) >= 2:
