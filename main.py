@@ -223,6 +223,7 @@ def _run(now: datetime, log_path: Path) -> None:
         "step_b_pass":   0,
         "step_c_pass":   0,
         "step_d_pass":   0,
+        "step_e_pass":   0,
         "final_pushed":  0,
     }
 
@@ -248,12 +249,13 @@ def _run(now: datetime, log_path: Path) -> None:
     stats["step_b_pass"]  = sum(1 for t in traces if t.step_b == "PASS")
     stats["step_c_pass"]  = sum(1 for t in traces if t.step_c == "PASS")
     stats["step_d_pass"]  = sum(1 for t in traces if t.step_d == "PASS")
+    stats["step_e_pass"]  = sum(1 for t in traces if t.step_e == "PASS")
     stats["final_pushed"] = len(clp_items)
 
     print(f"\n  === 运行结果 ===", flush=True)
     print(f"  CLP 清单: {len(clp_items)} 条", flush=True)
     for item in clp_items:
-        print(f"    {item.al0}  CLP_Cutoff={item.clp_cutoff_str}  POL={item.pol}  POD={item.pod}", flush=True)
+        print(f"    {item.al0}  SI_Cutoff={item.si_cutoff_str}  AllReady={item.all_ready_str}  POL={item.pol}  POD={item.pod}", flush=True)
 
     # ── Outlook 弹窗（LSP 邮件草稿）──────────────────────────────────────
     popup_result = None
@@ -277,12 +279,12 @@ def _run(now: datetime, log_path: Path) -> None:
         "stats":      stats,
         "clp_items":  [
             {
-                "al0":           item.al0,
-                "pol":           item.pol,
-                "pod":           item.pod,
-                "etd":           item.etd_str,
-                "clp_cutoff":    item.clp_cutoff_str,
-                "all_ready_cut": item.all_ready_cut_str,
+                "al0":               item.al0,
+                "pol":               item.pol,
+                "pod":               item.pod,
+                "etd":               item.etd_str,
+                "si_cutoff":         item.si_cutoff_str,
+                "all_ready_datetime": item.all_ready_str,
             }
             for item in clp_items
         ],

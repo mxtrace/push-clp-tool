@@ -22,6 +22,7 @@ _RESULT_COLORS = {
     "SKIP_B":  "#F2F2F2",   # 灰
     "SKIP_C":  "#FFF2CC",   # 浅黄
     "SKIP_D":  "#FCE4D6",   # 浅橙
+    "SKIP_E":  "#F4CCCC",   # 浅红
 }
 
 
@@ -36,7 +37,8 @@ def _build_stats_html(stats: dict, run_time: str) -> str:
         ("目标订单 (MSPP+SMP)", stats.get("target_orders", "-")),
         ("步骤B 通过",         stats.get("step_b_pass", "-")),
         ("步骤C 通过",         stats.get("step_c_pass", "-")),
-        ("步骤D 通过",         stats.get("step_d_pass", "-")),
+        ("步骤D 通过（≥8h）",  stats.get("step_d_pass", "-")),
+        ("步骤E 通过（未CLP）", stats.get("step_e_pass", "-")),
         ("最终推送",           f'<b style="background:{pushed_color};padding:2px 6px;">{pushed}</b>'),
     ]
     trs = ""
@@ -60,7 +62,7 @@ def _build_trace_html(traces: list) -> str:
     if not traces:
         return "<p style='color:#888;'>本次无目标订单处理记录。</p>"
 
-    headers = ["AL0", "POL", "POD", "步骤B", "步骤B详情", "步骤C", "步骤C详情", "步骤D", "步骤D详情", "结果"]
+    headers = ["AL0", "POL", "POD", "步骤B", "步骤B详情", "步骤C", "步骤C详情", "步骤D(≥8h)", "步骤D详情", "步骤E(CLP)", "步骤E详情", "结果"]
     header_row = "".join(f"<th {_TH_STYLE}>{h}</th>" for h in headers)
 
     rows_html = ""
@@ -80,6 +82,7 @@ def _build_trace_html(traces: list) -> str:
                 + cell(t.step_b) + cell(t.step_b_detail)
                 + cell(t.step_c) + cell(t.step_c_detail)
                 + cell(t.step_d) + cell(t.step_d_detail)
+                + cell(getattr(t, "step_e", "")) + cell(getattr(t, "step_e_detail", ""))
                 + cell(f"<b>{result}</b>")
                 + "</tr>"
             )
@@ -91,6 +94,7 @@ def _build_trace_html(traces: list) -> str:
                 + cell(t.get("step_b")) + cell(t.get("step_b_detail"))
                 + cell(t.get("step_c")) + cell(t.get("step_c_detail"))
                 + cell(t.get("step_d")) + cell(t.get("step_d_detail"))
+                + cell(t.get("step_e", "")) + cell(t.get("step_e_detail", ""))
                 + cell(f"<b>{result}</b>")
                 + "</tr>"
             )

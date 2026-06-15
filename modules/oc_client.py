@@ -2,7 +2,7 @@
 oc_client.py — OC 系统 API 客户端（Push CLP 版）
 新增：
   - fetch_booking_detail 返回 has_clp（containers 非空判断）
-  - fetch_clp_tasks_all_closed（7个 CLP Task 全关闭检查）
+  - fetch_clp_tasks_all_closed（7个 CLP Task 全关闭检查 + all_ready_datetime）
 """
 from __future__ import annotations
 
@@ -20,9 +20,18 @@ OC_BASE    = "https://trans-logistics-cn.amazon.com"
 
 PLOT_API          = f"{OC_BASE}/aglt/config/supply/api/network-management/search"
 BOOKING_DETAIL_API= f"{OC_BASE}/aglt/rest/bookingV2/getBookingById/{{al0}}"
-TASK_INSTANCE_API = f"{OC_BASE}/aglt/v2/api/everest/task-instance/{{al0}}?openTaskOnly=true"
+TASK_INSTANCE_API     = f"{OC_BASE}/aglt/v2/api/everest/task-instance/{{al0}}?openTaskOnly=true"
+TASK_INSTANCE_API_ALL = f"{OC_BASE}/aglt/v2/api/everest/task-instance/{{al0}}?openTaskOnly=false"
 
-# Push CLP 需要检查的 7 个 Task（任意一个存在于 openTaskOnly=true 结果中 = 未关闭）
+# Task 已关闭的状态值（PRD 步骤 C）
+CLOSED_STATUSES = frozenset({
+    "CLOSED_MISSED_SLA",
+    "CLOSED_IN_SLA",
+    "CLOSED_NO_SLA",
+    "CLOSED_MISS_SLA_REASON",
+})
+
+# Push CLP 需要检查的 7 个 Task（openTaskOnly=false 查全量，taskStatus 需在 CLOSED_STATUSES 中）
 CLP_TASK_NAMES = frozenset({
     "SEND_SI_TO_LSP_LCL",
     "CARGO_EXCEPTION_LCL",
@@ -189,41 +198,94 @@ def fetch_clp_tasks_all_closed(
     al0: str,
     browser: str = "firefox",
     session: Optional[requests.Session] = None,
-) -> Optional[bool]:
+) -> tuple:
     """
-    步骤 C：检查该 AL0 的 CLP 相关 Task 是否全部关闭。
+    步骤 C：检查该 AL0 的 CLP 相关 Task 是否全部关闭，并获取最大关闭时间戳。
 
-    原理：TASK_INSTANCE_API 默认 openTaskOnly=true，只返回 open 状态的 Task。
-    - 若 CLP_TASK_NAMES 中任意 Task 出现在响应里 → 该 Task 是 open → 未全关闭 → 返回 False
-    - 若无一 CLP Task 出现 → 全部已关闭或从未创建 → 返回 True
+    使用 openTaskOnly=false 获取全量 Task（含已关闭）。
+    - 找出所有属于 CLP_TASK_NAMES 的 Task
+    - 若任意 CLP Task 的 taskStatus 不在 CLOSED_STATUSES → 返回 (False, None)
+    - 若全部在 CLOSED_STATUSES → 返回 (True, max_close_dt)
+    - max_close_dt = 所有 CLP Task 中最大的 closeDateTimestamp（北京时区 datetime）
 
     Returns:
-        True  — 所有相关 Task 已关闭（或从未创建），可以继续步骤 D
-        False — 存在未关闭的相关 Task，跳过该 AL0
-        None  — API 调用失败，不确定（保守处理：视为 False）
+        (True,  max_close_dt) — 全部关闭，可继续步骤 D
+        (False, None)         — 存在未关闭的 Task，跳过
+        (None,  None)         — API 调用失败，保守处理视为 False
     """
     if session is None:
         session = build_oc_session(browser)
-    url = TASK_INSTANCE_API.format(al0=al0)
+    url = TASK_INSTANCE_API_ALL.format(al0=al0)
     try:
         resp = session.get(url, timeout=15)
         resp.raise_for_status()
         task_list = resp.json().get("everestTaskInstanceDataList", [])
 
+        # 收集所有 CLP Task 的状态和关闭时间戳
+        clp_tasks = []   # list of (task_id, task_status, close_ts_ms)
         for item in task_list:
             c = item.get("operatorConsoleTaskInstance")
             if not c:
                 continue
             task_id = _extract_task_id(c)
-            if task_id in CLP_TASK_NAMES:
-                print(f"         [{al0}] 步骤C 不通过：存在 open Task = {task_id}", flush=True)
-                return False
+            if task_id not in CLP_TASK_NAMES:
+                continue
 
-        return True
+            # 提取 taskStatus 和 closeDateTimestamp（先从嵌套路径，再从顶层）
+            booking_raw = c.get("relatedDimensions", {}).get("BOOKING")
+            task_status = ""
+            close_ts    = None
+
+            if isinstance(booking_raw, dict):
+                assignees   = booking_raw.get("taskAssignees", {})
+                task_status = (
+                    assignees.get("taskStatus")
+                    or booking_raw.get("taskStatus", "")
+                )
+                close_ts = (
+                    assignees.get("closeDateTimestamp")
+                    or booking_raw.get("closeDateTimestamp")
+                )
+
+            if not task_status:
+                task_status = c.get("taskStatus", "")
+            if close_ts is None:
+                close_ts = c.get("closeDateTimestamp")
+
+            clp_tasks.append((task_id, str(task_status).strip(), close_ts))
+
+        if not clp_tasks:
+            print(f"         [{al0}] 步骤C：未找到任何 CLP Task（保守跳过）", flush=True)
+            return False, None
+
+        # 检查是否全部关闭
+        for task_id, task_status, _ in clp_tasks:
+            if task_status not in CLOSED_STATUSES:
+                print(
+                    f"         [{al0}] 步骤C 不通过：Task {task_id} 状态 = {task_status}",
+                    flush=True,
+                )
+                return False, None
+
+        # 全部关闭 → 取最大 closeDateTimestamp
+        close_timestamps = [
+            ts for _, _, ts in clp_tasks
+            if isinstance(ts, (int, float)) and ts > 0
+        ]
+        max_close_dt: Optional[datetime] = None
+        if close_timestamps:
+            max_close_dt = datetime.fromtimestamp(max(close_timestamps) / 1000, tz=BEIJING_TZ)
+
+        print(
+            f"         [{al0}] 步骤C 通过（{len(clp_tasks)} 个 CLP Task 全关闭，"
+            f"最大关闭时间={max_close_dt}）",
+            flush=True,
+        )
+        return True, max_close_dt
 
     except Exception as exc:
         print(f"[WARN] fetch_clp_tasks_all_closed({al0}): {exc}")
-        return None
+        return None, None
 
 
 def _extract_task_id(c: dict) -> str:

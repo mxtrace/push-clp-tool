@@ -132,10 +132,10 @@ def filter_plot_records(
         if rec.get("capacityPhase") != "SECURED":    continue
         if rec.get("serviceLevel")  != "Standard":   continue
         try:
-            avail = float(rec.get("capacityAvailableValue", 0))
+            commitment = float(rec.get("capacityCommitmentValue", 0))
         except (ValueError, TypeError):
-            avail = 0.0
-        if avail == 0.0:
+            commitment = 0.0
+        if commitment == 0.0:
             continue
         pol = rec.get("pol", "")
         pod = rec.get("pod", "")

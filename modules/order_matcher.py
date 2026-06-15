@@ -206,25 +206,17 @@ def filter_orders_by_potential_sailing(
     pol_alias: dict | None = None,
 ) -> list:
     """
-    优化预筛：只保留 (POL, POD) 在本次船期表中有匹配、
-    且该船期 CLP_Cutoff 日期 = 今天 或 明天 的订单。
+    优化预筛：只保留 (POL, POD) 在本次船期表中有匹配的订单。
 
+    PRD v1.0：去掉 CLP_Cutoff 日期过滤，改为只匹配 POL/POD。
+    B-3 触发条件（today <= ETD - 1天）由 push_clp.run_task2 内部判断。
     在查询 SMP（OC Booking API）之前调用，大幅减少 API 调用量。
-    典型效果：500+ MSPP 订单 → 个位数到十几条。
     """
-    from datetime import timedelta
     if pol_alias is None:
         pol_alias = {"CNSZX": "CNYTN"}
 
-    tomorrow = today + timedelta(days=1)
-
-    # 构建有效 (pol, pod) 集合：CLP_Cutoff 在今天或明天的船期
-    relevant_pairs: set = set()
-    for s in weekly_schedule:
-        if s.clp_cutoff is not None:
-            clp_date = s.clp_cutoff.date()
-            if clp_date in (today, tomorrow):
-                relevant_pairs.add((s.pol, s.pod))
+    # 构建有效 (pol, pod) 集合：船期表中所有 POL/POD 组合
+    relevant_pairs: set = {(s.pol, s.pod) for s in weekly_schedule}
 
     filtered = []
     for order in orders:
