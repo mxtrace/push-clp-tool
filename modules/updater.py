@@ -5,7 +5,7 @@ import shutil
 import requests
 from packaging.version import Version
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 GITHUB_REPO = "mxtrace/push-clp-tool"
 ASSET_NAME = "PushCLP.exe"
 API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
