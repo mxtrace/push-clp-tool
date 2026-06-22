@@ -26,6 +26,7 @@ TASK_INSTANCE_API_ALL = f"{OC_BASE}/aglt/v2/api/everest/task-instance/{{al0}}?op
 
 # Task 已关闭的状态值（PRD 步骤 C）
 CLOSED_STATUSES = frozenset({
+    "CLOSED",
     "CLOSED_MISSED_SLA",
     "CLOSED_IN_SLA",
     "CLOSED_NO_SLA",
