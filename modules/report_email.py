@@ -149,6 +149,7 @@ def send_report_email(
     cfg:         dict,
     run_time:    str,
     anomalies:   list | None = None,
+    status_path: Path | None = None,
 ) -> bool:
     """
     自动发送运行报告邮件至管理员邮箱。
@@ -201,6 +202,10 @@ def send_report_email(
         # 添加附件：run_result.json
         if result_path and result_path.exists():
             mail.Attachments.Add(str(result_path))
+
+        # 添加附件：push_status.xlsx
+        if status_path and status_path.exists():
+            mail.Attachments.Add(str(status_path))
 
         mail.Send()   # 直接发送，无弹窗
         print(f"  [报告邮件] 已发送至 {to_addr}（主题：{subject}）", flush=True)

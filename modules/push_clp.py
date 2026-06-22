@@ -73,6 +73,13 @@ class OrderTrace:
     al0:           str
     pol:           str
     pod:           str
+    # 匹配船期信息（步骤B PASS时填充）
+    matched_etd:        str = ""
+    matched_vessel:     str = ""
+    matched_voyage:     str = ""
+    matched_si_cutoff:  str = ""
+    matched_clp_cutoff: str = ""
+    matched_service:    str = ""
     step_b:        str = "N/A"   # PASS / NO_SAILING / DATE_MISMATCH
     step_b_detail: str = ""
     step_c:        str = "N/A"   # PASS / OPEN_TASKS / NO_TASKS / QUERY_FAIL
@@ -88,6 +95,12 @@ class OrderTrace:
             "al0":           self.al0,
             "pol":           self.pol,
             "pod":           self.pod,
+            "matched_etd":        self.matched_etd,
+            "matched_vessel":     self.matched_vessel,
+            "matched_voyage":     self.matched_voyage,
+            "matched_si_cutoff":  self.matched_si_cutoff,
+            "matched_clp_cutoff": self.matched_clp_cutoff,
+            "matched_service":    self.matched_service,
             "step_b":        self.step_b,
             "step_b_detail": self.step_b_detail,
             "step_c":        self.step_c,
@@ -283,6 +296,12 @@ def run_task2(
             )
             continue
 
+        trace.matched_etd = str(nearest.etd)
+        trace.matched_vessel = nearest.vessel
+        trace.matched_voyage = nearest.voyage
+        trace.matched_si_cutoff = si_cutoff_str
+        trace.matched_clp_cutoff = nearest.clp_cutoff.strftime("%Y-%m-%d %H:%M") if nearest.clp_cutoff else ""
+        trace.matched_service = nearest.service_string
         trace.step_b = "PASS"
         trace.step_b_detail = (
             f"Service={nearest.service_string} "

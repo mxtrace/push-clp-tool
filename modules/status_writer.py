@@ -50,6 +50,7 @@ def write_status(
     ws1.title = "筛选漏斗"
     headers1 = [
         "AL0", "POL", "POD", "Shipper_ID", "is_MSPP", "is_SMP",
+        "ETD", "Vessel", "Voyage", "SI_Cutoff", "CLP_Cutoff", "Service",
         "step_B", "step_B_detail",
         "step_C", "step_C_detail",
         "step_D", "step_D_detail",
@@ -70,6 +71,8 @@ def write_status(
             row = [
                 order.al0, order.pol, order.pod, order.shipper_id,
                 order.is_mspp, order.is_smp,
+                trace.matched_etd, trace.matched_vessel, trace.matched_voyage,
+                trace.matched_si_cutoff, trace.matched_clp_cutoff, trace.matched_service,
                 trace.step_b, trace.step_b_detail,
                 trace.step_c, trace.step_c_detail,
                 trace.step_d, trace.step_d_detail,
@@ -87,6 +90,7 @@ def write_status(
             row = [
                 order.al0, order.pol, order.pod, order.shipper_id,
                 order.is_mspp, order.is_smp,
+                "", "", "", "", "", "",
                 "", "", "", "", "", "", "", "",
                 final_status, reason, run_time_str,
             ]

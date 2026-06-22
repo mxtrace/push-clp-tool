@@ -328,6 +328,7 @@ def _run(now: datetime, log_path: Path) -> None:
         cfg         = cfg,
         run_time    = run_time_str,
         anomalies   = anomalies,
+        status_path = status_path,
     )
 
     print(f"\n  === 完成 ===", flush=True)
