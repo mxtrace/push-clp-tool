@@ -89,6 +89,8 @@ def fetch_plot_data(etd_from: date, etd_to: date, browser: str = "firefox") -> l
         "transportationMode": "Ocean",
         "serviceType":        "Transportation",
         "tenant":             "AMAZON_FBA_INBOUND",
+        "loadType":           "LCL",
+        "capacityPhase":      "SECURED",
         "etdFrom":            _to_beijing_ms(etd_from),
         "etdTo":              _to_beijing_ms(etd_to, end_of_day=True),
         "pageNumber":         1,
