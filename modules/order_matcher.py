@@ -13,6 +13,15 @@ import openpyxl
 # PRD v1.1：OC Task 未发送状态值
 NOT_SENT_STATUSES: frozenset[str] = frozenset({"PENDING", "CLOSE_TO_SLA", "MISSED_SLA", "NO_SLA"})
 
+# Demo 阶段：仅处理盐田。扩展时取消注释对应 POL。
+DEMO_POL_FILTER: frozenset[str] = frozenset({
+    "CNYTN",
+    # "CNNGB",  # demo 暂停
+    # "CNXMN",  # demo 暂停
+    # "CNSHA",  # demo 暂停
+    # "CNTAO",  # demo 暂停
+})
+
 
 @dataclass
 class OrderRecord:

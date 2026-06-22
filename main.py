@@ -174,6 +174,11 @@ def _run(now: datetime, log_path: Path) -> None:
         if order.pol in pol_alias:
             order.pol = pol_alias[order.pol]
 
+    # Demo 阶段：alias 规范化后再过滤，确保 CNSZX→CNYTN 别名已生效
+    from modules.order_matcher import DEMO_POL_FILTER
+    orders = [o for o in orders if o.pol in DEMO_POL_FILTER]
+    print(f"         POL过滤（Demo）后: {len(orders)} 条", flush=True)
+
     mspp_path = ROOT / cfg["mspp_list_path"] if not Path(cfg["mspp_list_path"]).is_absolute() else Path(cfg["mspp_list_path"])
     mspp_ids  = load_mspp_shipper_list(
         str(mspp_path),
@@ -300,6 +305,18 @@ def _run(now: datetime, log_path: Path) -> None:
     with open(result_path, "w", encoding="utf-8") as _rf:
         json.dump(run_result, _rf, ensure_ascii=False, indent=2)
     print(f"  结果已写入: {result_path}", flush=True)
+
+    # ── 状态表：生成 push_status.xlsx ─────────────────────
+    from modules.status_writer import write_status
+    status_path = ROOT / "data" / "push_status.xlsx"
+    write_status(
+        orders      = orders,
+        traces      = traces,
+        clp_items   = clp_items,
+        output_path = str(status_path),
+        run_time    = now,
+    )
+    print(f"  [状态表] 已写入: {status_path}", flush=True)
 
     # ── 发送运行报告邮件（始终执行，含 0 推送的情况）────────────────────
     print("\n  [报告邮件] 准备发送运行报告...", flush=True)

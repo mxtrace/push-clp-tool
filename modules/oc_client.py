@@ -20,6 +20,7 @@ OC_BASE    = "https://trans-logistics-cn.amazon.com"
 
 PLOT_API          = f"{OC_BASE}/aglt/config/supply/api/network-management/search"
 BOOKING_DETAIL_API= f"{OC_BASE}/aglt/rest/bookingV2/getBookingById/{{al0}}"
+CONTAINER_DETAILS_API = f"{OC_BASE}/aglt/v2/api/containerV2/getContainerDetailsById"
 TASK_INSTANCE_API     = f"{OC_BASE}/aglt/v2/api/everest/task-instance/{{al0}}?openTaskOnly=true"
 TASK_INSTANCE_API_ALL = f"{OC_BASE}/aglt/v2/api/everest/task-instance/{{al0}}?openTaskOnly=false"
 
@@ -194,6 +195,74 @@ def fetch_booking_detail(
         return None
 
 
+
+def fetch_clp_via_container_details(
+    al0: str,
+    browser: str = "firefox",
+    session: Optional[requests.Session] = None,
+) -> tuple:
+    """
+    步骤 E：通过 getBookingById → getContainerDetailsById 判断是否已完成 CLP。
+
+    流程：
+      1. 调用 getBookingById 获取 containers 数组
+      2. 若 containers 为空 → False（未 CLP）
+      3. 取 containers[0].containerId（cont-... 格式内部 ID）
+      4. POST getContainerDetailsById → containerDetails 非空 → True（已 CLP）
+
+    Returns:
+        (True,  diag) — 已完成 CLP
+        (False, diag) — 未完成 CLP
+        (None,  diag) — API 调用失败（保守跳过）
+    """
+    if session is None:
+        session = build_oc_session(browser)
+
+    # Step 1: 获取 Booking 的 containers 数组
+    url = BOOKING_DETAIL_API.format(al0=al0)
+    try:
+        resp = session.get(url, timeout=15)
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get("status") != "SUCCESS":
+            return None, f"API返回status={body.get('status')}"
+        data = body.get("data") or {}
+        containers = data.get("containers") or []
+
+        if not isinstance(containers, list) or len(containers) == 0:
+            return False, "containers=[]"
+
+        # Step 2: 提取第一个 container 的内部 ID（cont-... 格式）
+        first = containers[0]
+        container_id = ""
+        if isinstance(first, dict):
+            container_id = (
+                first.get("containerId") or
+                first.get("id") or
+                ""
+            )
+
+        if not container_id:
+            # containers 非空但无法取到 ID → 保守认为已 CLP
+            return True, f"containers={len(containers)}个, containerId为空(保守判定已CLP)"
+
+        # Step 3: 调用 getContainerDetailsById
+        detail_resp = session.post(
+            CONTAINER_DETAILS_API,
+            json={"containerId": container_id},
+            timeout=15,
+        )
+        detail_resp.raise_for_status()
+        detail_body = detail_resp.json()
+        container_details = detail_body.get("containerDetails")
+        if container_details is not None:
+            return True, f"containers=[{container_id}] → containerDetails存在"
+        else:
+            return False, f"containers=[{container_id}] → containerDetails为空"
+
+    except Exception as exc:
+        return None, f"API异常: {exc}"
+
 def fetch_clp_tasks_all_closed(
     al0: str,
     browser: str = "firefox",
@@ -238,13 +307,10 @@ def fetch_clp_tasks_all_closed(
 
             if isinstance(booking_raw, dict):
                 assignees   = booking_raw.get("taskAssignees", {})
-                task_status = (
-                    assignees.get("taskStatus")
-                    or booking_raw.get("taskStatus", "")
-                )
+                task_status = booking_raw.get("taskStatus") or ""
                 close_ts = (
-                    assignees.get("closeDateTimestamp")
-                    or booking_raw.get("closeDateTimestamp")
+                    booking_raw.get("closeDateTimestamp")
+                    or assignees.get("closeDateTimestamp")
                 )
 
             if not task_status:

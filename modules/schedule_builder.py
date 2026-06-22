@@ -1,6 +1,6 @@
 """
 schedule_builder.py — 模块1：周船期表构建
-从 PLOT 数据过滤目标船期，直接从 SI_Cutoff 计算截单日期和时间。
+从 PLOT 数据过滤目标船期，解析 SI_Cutoff / CLP_Cutoff / ETD。
 Push CLP 版：SailingRecord 新增 clp_cutoff 字段。
 """
 from __future__ import annotations
@@ -16,10 +16,6 @@ BEIJING_TZ = pytz.timezone("Asia/Shanghai")
 TARGET_POL = {"CNYTN", "CNNGB", "CNXMN", "CNSHA", "CNTAO"}
 TARGET_POD = {"USLAX", "USNYC", "USSAV"}
 
-# all_ready_cut_date 偏移规则（PRD 3.2）
-# weekday(): 周一=0 … 周日=6
-ALL_READY_OFFSETS = {0: -3, 1: -1, 2: -1, 3: -1, 4: -1, 5: -1, 6: -2}
-
 
 @dataclass
 class SailingRecord:
@@ -31,9 +27,6 @@ class SailingRecord:
     voyage:                 str
     si_cutoff:              datetime            # PLOT SI_Cutoff 完整 datetime
     available_capacity:     float
-    all_ready_cut_date:     date
-    all_ready_cut_time:     Optional[str]       = None   # "HH:MM"
-    all_ready_cut_datetime: Optional[datetime]  = None
     clp_cutoff:             Optional[datetime]  = None   # PLOT localDateTimeCLPCutoff
     service_string:         str                 = ""     # PLOT serviceString (e.g. PRX, CBX)
     anomaly:                bool                = False
@@ -50,21 +43,6 @@ def get_schedule_range(today: Optional[date] = None) -> tuple[date, date]:
     days_to_this_sat = (5 - today.weekday()) % 7
     next_saturday = today + timedelta(days=days_to_this_sat + 7)
     return today, next_saturday
-
-
-def compute_all_ready_cut(si_cutoff: datetime) -> tuple[date, str, datetime]:
-    """
-    根据 SI_Cutoff 计算 all_ready_cut_date / time / datetime（PRD 3.2）。
-
-    Returns:
-        (all_ready_cut_date, all_ready_cut_time_str, all_ready_cut_datetime)
-    """
-    offset = ALL_READY_OFFSETS[si_cutoff.weekday()]
-    cut_date = si_cutoff.date() + timedelta(days=offset)
-    cut_time = si_cutoff.time()
-    cut_time_str = cut_time.strftime("%H:%M")
-    cut_dt = BEIJING_TZ.localize(datetime.combine(cut_date, cut_time))
-    return cut_date, cut_time_str, cut_dt
 
 
 def _parse_etd(record: dict) -> Optional[date]:
@@ -194,21 +172,15 @@ def build_weekly_schedule(
                 vessel=vessel, voyage=voyage,
                 si_cutoff=si_cutoff or BEIJING_TZ.localize(datetime.now()),
                 available_capacity=avail,
-                all_ready_cut_date=date.today(),
                 anomaly=True, anomaly_reason="ETD 或 SI_Cutoff 解析失败",
             ))
             continue
-
-        cut_date, cut_time_str, cut_dt = compute_all_ready_cut(si_cutoff)
 
         ok_sailings.append(SailingRecord(
             pol=pol, pod=pod, etd=etd,
             vessel=vessel, voyage=voyage,
             si_cutoff=si_cutoff,
             available_capacity=avail,
-            all_ready_cut_date=cut_date,
-            all_ready_cut_time=cut_time_str,
-            all_ready_cut_datetime=cut_dt,
             clp_cutoff=clp_cutoff,
             service_string=service_string,
         ))

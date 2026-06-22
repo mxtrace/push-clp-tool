@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Optional
 
 import openpyxl
@@ -22,10 +22,9 @@ from .schedule_builder import SailingRecord
 from .order_matcher    import OrderRecord
 from .oc_client        import (
     build_oc_session,
-    fetch_booking_detail,
+    fetch_clp_via_container_details,
     fetch_clp_tasks_all_closed,
 )
-from .working_hours    import hours_since
 
 BEIJING_TZ = pytz.timezone("Asia/Shanghai")
 
@@ -42,6 +41,8 @@ class CLPItem:
     etd:                date
     pol:                str
     pod:                str
+    vessel:             str = ""
+    voyage:             str = ""
 
     @property
     def all_ready_str(self) -> str:
@@ -158,27 +159,29 @@ def _find_nearest_sailing(
     pol: str,
     pod: str,
     weekly_schedule: list[SailingRecord],
-    now: datetime,
+    now: datetime = None,
 ) -> Optional[SailingRecord]:
     """
-    步骤 B-2：在船期表中找到 POL/POD 匹配、all_ready_cut_datetime > now 的最近一条船期。
-    最近 = all_ready_cut_datetime 最小（但仍 > now）。
+    步骤 B-2：在船期表中找到 POL/POD 匹配且未过期的船期，取 SI_Cutoff 最近的一条。
+    过期判定：SI_Cutoff 当天 17:00 之前仍有效。
     """
+    if now is None:
+        now = datetime.now(BEIJING_TZ)
     candidates = [
         s for s in weekly_schedule
-        if s.pol == pol
-        and s.pod == pod
-        and s.all_ready_cut_datetime is not None
-        and s.all_ready_cut_datetime > now
+        if s.pol == pol and s.pod == pod and s.si_cutoff is not None
+        and now <= BEIJING_TZ.localize(
+            datetime.combine(s.si_cutoff.date(), datetime.strptime("17:00", "%H:%M").time())
+        )
     ]
     if not candidates:
         return None
-    return min(candidates, key=lambda s: s.all_ready_cut_datetime)
+    return min(candidates, key=lambda s: s.si_cutoff)
 
 
 def _build_table_html(items: list[CLPItem]) -> str:
     """将 CLPItem 列表渲染为 HTML 表格（步骤 F 正文内嵌）。"""
-    headers = ["AL0", "All Ready Datetime", "SI Cutoff", "ETD", "POL", "POD"]
+    headers = ["AL0", "All Ready Datetime", "SI Cutoff", "ETD", "POL", "POD", "Mother vessel", "Mother voyage", "CLP状态反馈"]
     th_style = (
         'style="background-color:#4472C4;color:white;padding:4px 8px;'
         'font-family:等线,DengXian,Calibri,sans-serif;font-size:10pt;"'
@@ -198,6 +201,9 @@ def _build_table_html(items: list[CLPItem]) -> str:
             f"<td {td_style}>{item.etd_str}</td>"
             f"<td {td_style}>{item.pol}</td>"
             f"<td {td_style}>{item.pod}</td>"
+            f"<td {td_style}>{item.vessel}</td>"
+            f"<td {td_style}>{item.voyage}</td>"
+            f"<td {td_style}></td>"
             f"</tr>"
         )
     return (
@@ -233,13 +239,10 @@ def run_task2(
     if now is None:
         now = datetime.now(BEIJING_TZ)
 
-    today = now.date()
-
     # ── 步骤 B-1/B-2/B-3：识别目标 AL0 ──────────────────────────────────
     target_orders = [o for o in orders if o.is_target]
     print(f"  [Task2] 目标订单（MSPP+SMP）: {len(target_orders)} 条", flush=True)
 
-    # 预筛：找出有匹配船期的订单
     step_b_pass: list[tuple[OrderRecord, SailingRecord, OrderTrace]] = []
     traces: list[OrderTrace] = []
 
@@ -249,7 +252,7 @@ def run_task2(
         pod = order.pod
         trace = OrderTrace(al0=order.al0, pol=pol, pod=pod)
 
-        # B-2: 匹配最近船期
+        # B-2: 按 POL/POD 匹配，取 SI_Cutoff 最近的船期
         nearest = _find_nearest_sailing(pol, pod, weekly_schedule, now)
         if nearest is None:
             trace.step_b = "NO_SAILING"
@@ -259,21 +262,23 @@ def run_task2(
             print(f"         [{order.al0}] 步骤B 无匹配船期（POL={pol} POD={pod}），跳过", flush=True)
             continue
 
-        # B-3: 触发条件：today <= ETD - 1天（PRD v1.0）
-        etd_minus_1 = nearest.etd - timedelta(days=1)
-        if today > etd_minus_1:
-            trace.step_b = "DATE_MISMATCH"
+        # B-3 条件③: 持续触发直至 SI_Cutoff 当天 17:00 执行后停止
+        si_cutoff_str = nearest.si_cutoff.strftime("%Y-%m-%d %H:%M")
+        si_cutoff_deadline = BEIJING_TZ.localize(
+            datetime.combine(nearest.si_cutoff.date(), datetime.strptime("17:00", "%H:%M").time())
+        )
+        if now > si_cutoff_deadline:
+            trace.step_b = "SI_CUTOFF_PASSED"
             trace.step_b_detail = (
                 f"Service={nearest.service_string} "
                 f"ETD={nearest.etd} "
-                f"ETD-1={etd_minus_1} "
-                f"today({today}) > ETD-1({etd_minus_1})，超过触发窗口"
+                f"SI_Cutoff={si_cutoff_str} "
+                f"已超截单时间（now={now.strftime('%Y-%m-%d %H:%M')}）"
             )
             trace.result = "SKIP_B"
             traces.append(trace)
             print(
-                f"         [{order.al0}] 步骤B SKIP POL={pol} POD={pod} "
-                f"ETD={nearest.etd} today({today}) > ETD-1({etd_minus_1})，跳过",
+                f"         [{order.al0}] 步骤B SKIP：SI_Cutoff={si_cutoff_str} 已过，跳过",
                 flush=True,
             )
             continue
@@ -282,11 +287,12 @@ def run_task2(
         trace.step_b_detail = (
             f"Service={nearest.service_string} "
             f"ETD={nearest.etd} "
-            f"today({today}) <= ETD-1({etd_minus_1})"
+            f"SI_Cutoff={si_cutoff_str} "
+            f"now={now.strftime('%Y-%m-%d %H:%M')} <= SI_Cutoff"
         )
         print(
             f"         [{order.al0}] 步骤B PASS POL={pol} POD={pod} "
-            f"ETD={nearest.etd} today({today}) <= ETD-1({etd_minus_1})",
+            f"ETD={nearest.etd} SI_Cutoff={si_cutoff_str}",
             flush=True,
         )
         step_b_pass.append((order, nearest, trace))
@@ -326,62 +332,29 @@ def run_task2(
         trace.step_c = "PASS"
         trace.step_c_detail = f"7个 CLP Task 全部 CLOSED，all_ready_datetime={all_ready_dt}"
 
-        # ── 步骤 D（新增）：工作小时数 >= 8 ─────────────────────────────
-        if all_ready_dt is None:
-            trace.step_d = "NO_TIMESTAMP"
-            trace.step_d_detail = "closeDateTimestamp 不可用，跳过"
-            trace.result = "SKIP_D"
-            traces.append(trace)
-            print(f"         [{order.al0}] 步骤D：closeDateTimestamp 不可用，跳过", flush=True)
-            continue
-
-        elapsed = hours_since(all_ready_dt, now)
-        if elapsed < 8:
-            trace.step_d = "INSUFFICIENT_HOURS"
-            trace.step_d_detail = (
-                f"all_ready_datetime={all_ready_dt}，"
-                f"elapsed={elapsed:.1f}h < 8h，尚未超时"
-            )
-            trace.result = "SKIP_D"
-            traces.append(trace)
-            print(
-                f"         [{order.al0}] 步骤D SKIP：elapsed={elapsed:.1f}h < 8h，跳过",
-                flush=True,
-            )
-            continue
-
-        trace.step_d = "PASS"
-        trace.step_d_detail = (
-            f"all_ready_datetime={all_ready_dt}，elapsed={elapsed:.1f}h >= 8h"
-        )
-        print(
-            f"         [{order.al0}] 步骤D 通过：elapsed={elapsed:.1f}h >= 8h",
-            flush=True,
-        )
-
-        # ── 步骤 E（原步骤D）：Container Number 为空（尚未 CLP）────────
+        # ── 步骤 E（原步骤D）：Container 详情为空（尚未 CLP）──────────────────
         time.sleep(0.2)
-        detail = fetch_booking_detail(order.al0, browser=browser, session=oc_session)
-        if detail is None:
+        has_clp, clp_diag = fetch_clp_via_container_details(order.al0, browser=browser, session=oc_session)
+        if has_clp is None:
             trace.step_e = "QUERY_FAIL"
-            trace.step_e_detail = "Booking 详情获取失败"
+            trace.step_e_detail = f"Container 详情获取失败: {clp_diag}"
             trace.result = "SKIP_E"
             traces.append(trace)
-            print(f"         [{order.al0}] 步骤E Booking 详情获取失败，跳过", flush=True)
+            print(f"         [{order.al0}] 步骤E: {clp_diag} → 查询失败，跳过", flush=True)
             continue
-        if detail.get("has_clp", False):
+        if has_clp:
             trace.step_e = "HAS_CLP"
-            trace.step_e_detail = "containers 非空，已完成 CLP"
+            trace.step_e_detail = f"已完成CLP: {clp_diag}"
             trace.result = "SKIP_E"
             traces.append(trace)
-            print(f"         [{order.al0}] 步骤E 已完成 CLP（containers 非空），跳过", flush=True)
+            print(f"         [{order.al0}] 步骤E: {clp_diag} → 已CLP，跳过", flush=True)
             continue
 
         trace.step_e = "PASS"
-        trace.step_e_detail = "containers 为空，尚未 CLP"
+        trace.step_e_detail = f"未CLP: {clp_diag}"
         trace.result = "PUSHED"
         traces.append(trace)
-        print(f"         [{order.al0}] 步骤E 通过（尚未 CLP）✓ 纳入清单", flush=True)
+        print(f"         [{order.al0}] 步骤E: {clp_diag} → 未CLP ✓ 纳入清单", flush=True)
 
         # ── 记录清单 ─────────────────────────────────────────────────────
         clp_items.append(CLPItem(
@@ -391,6 +364,8 @@ def run_task2(
             etd                = sailing.etd,
             pol                = pol,
             pod                = order.pod,
+            vessel             = sailing.vessel,
+            voyage             = sailing.voyage,
         ))
 
         time.sleep(0.1)
@@ -408,9 +383,7 @@ def run_task2(
     email_drafts: list[CLPEmailDraft] = []
 
     for pol, items in pol_groups.items():
-        to_emails = lsp_emails.get(pol, [])
-        if not to_emails:
-            print(f"  [WARN] POL={pol} 无对应 LSP 邮箱，邮件草稿仍生成（TO 为空）", flush=True)
+        to_emails = ["kongqman@amazon.com"]
 
         table_html = _build_table_html(items)
         body_html  = blurb_html + "<br><br>" + table_html
