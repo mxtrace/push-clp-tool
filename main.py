@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import traceback as _traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytz
@@ -132,8 +132,11 @@ def _run(now: datetime, log_path: Path) -> None:
     etd_from, etd_to = get_schedule_range(now.date())
     print(f"         船期范围: {etd_from} ~ {etd_to}", flush=True)
 
-    plot_raw = fetch_plot_data(etd_from, etd_to, browser=browser)
-    print(f"         PLOT 原始记录: {len(plot_raw)} 条", flush=True)
+    # PLOT API 按 Original ETD 过滤；往前多拉 3 天，捞到近期顺延的船
+    # Python 层 build_weekly_schedule 仍用原始 etd_from 过滤 Latest ETD >= 今天
+    api_etd_from = etd_from - timedelta(days=3)
+    plot_raw = fetch_plot_data(api_etd_from, etd_to, browser=browser)
+    print(f"         PLOT 原始记录: {len(plot_raw)} 条（API 抓取范围 {api_etd_from} ~ {etd_to}）", flush=True)
 
     weekly_ok, weekly_anomaly = build_weekly_schedule(
         plot_raw, [], {}, etd_from, etd_to
